@@ -7,6 +7,20 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+FILE *snapshot;
+
+// functie pentru deschiderea fisierului 
+void openFile(char *path) 
+{
+    char snapshotPath[1024];
+    sprintf(snapshotPath, "%s/snapshot.txt", path);
+    snapshot=fopen(snapshotPath, "wt");
+    if (snapshot == NULL) {
+        perror("Eroare deschidere fisier snapshot.txt pentru scriere!\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
 //functie pentru parcurgerea recusiva a unui director pentru a obtine informatii despre acesta
 //path - calea catre director
 //depth - nivelul de adancime in director
@@ -33,9 +47,9 @@ void listFiles(char *path,int depth)
         }
         for (int i = 1; i < depth; ++i)
         {
-            printf("\t");
+            fprintf(snapshot,"|  ");
         }
-        printf("|-- %s\n", entry->d_name);
+        fprintf(snapshot,"|_ %s\n",entry->d_name);
         //obtinem informatii despre fisierul/directorul curent
         if (stat(filepath, &file_info) == -1) 
         {
@@ -59,7 +73,9 @@ int main(int argc,char *argv[])
         perror("Eroare numar de argumente!\n");
         exit(0);
     }
-    printf("%s\n",argv[1]);
+    openFile(argv[1]);
+    fprintf(snapshot,"%s\n",argv[1]);
     listFiles(argv[1],1);
+    fclose(snapshot);
     return 0;
 }
