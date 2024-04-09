@@ -3,20 +3,20 @@
 #include<ctype.h>
 #include<string.h>
 #include<dirent.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#include <fcntl.h>
+#include<sys/types.h>
+#include<sys/stat.h>
+#include<unistd.h>
+#include<fcntl.h>
 
 // functie pentru deschiderea fisierului 
 int openFile(char *path, char *file) 
 {
-    char snapshotPath[1024];
+    char snapshotPath[2048];
     sprintf(snapshotPath, "%s/%s", path, file);
-    int fd = creat(snapshotPath, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+    int fd = creat(snapshotPath, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH);
     if (fd == -1) 
     {
-        perror("Eroare deschidere fisier snapshot.txt pentru scriere!\n");
+        perror("Eroare deschidere fisier snapshot pentru scriere!\n");
         exit(1);
     }
     return fd;
@@ -39,7 +39,7 @@ void listFiles(char *path, char *file, int depth, int fd)
     //citim directorul folosind functia readdir
     while ((entry = readdir(dir)) != NULL) 
     {
-        char filepath[1024];
+        char filepath[2048];
         sprintf(filepath, "%s/%s", path, entry->d_name);
         //ignoram intrarile "." si ".."
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) 
@@ -107,6 +107,44 @@ int verifyArguments(char *arg[],int n)
     return 1;
 }
 
+//functie de comparare a 2 fisiere snapshot
+int compareSnapshots(char *path, char *file1, char *file2) 
+{
+    char pathFile1[2048];
+    char pathFile2[2048];
+    sprintf(pathFile1,"%s/%s",path,file1);
+    sprintf(pathFile2,"%s/%s",path,file2);
+    // deschidem cele 2 fisiere snapshot
+    int fd1 = open(pathFile1, O_RDONLY, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH);
+    int fd2 = open(pathFile2, O_RDONLY, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH);
+    if (fd1 == -1 || fd2 == -1) 
+    {
+        perror("Eroare deschidere fisiere snapshot pentru comparare!\n");
+        exit(1);
+    }
+    // comparam continutul din cele 2 fisiere
+    char c1, c2;
+    ssize_t bytes_read1, bytes_read2;
+    while ((bytes_read1 = read(fd1, &c1, sizeof(char))) != 0 && (bytes_read2 = read(fd2, &c2, sizeof(char))) != 0) 
+    {
+        if (c1 != c2) 
+        {
+            close(fd1);
+            close(fd2);
+            return 0;
+        }
+    }
+    if (bytes_read1 == 0 && bytes_read2 == 0) 
+    {
+        close(fd1);
+        close(fd2);
+        return 1;
+    }
+    close(fd1);
+    close(fd2);
+    return 0;
+}
+
 int main(int argc, char *argv[]) 
 {
     if ((argc<3 || argc>11) && verifyArguments(argv,argc)==0) 
@@ -119,17 +157,48 @@ int main(int argc, char *argv[])
         perror("Eroare argumente!\n");
         exit(1);
     }
-    for(int i=1;i<argc-1;i++)
-    {
+     for (int i = 1; i < argc-1; i++) 
+     {
         char snapshot[1024] = "snapshot_";
         strcat(snapshot, argv[i]);
         strcat(snapshot, ".txt");
-        int fd = openFile(argv[argc-1], snapshot);
-        if(verifyDirectory(argv[i])==1)
+        char snapshotPath[2048];
+        sprintf(snapshotPath,"%s/%s",argv[argc-1],snapshot);
+        //verificam daca fisierul snapshot exista deja
+        struct stat info;
+        if (stat(snapshotPath, &info)==0) 
         {
-           listFiles(argv[i],snapshot,1,fd);
+            //cream un alt fisier snapshot
+            char newSnapshot[2048];
+            strcpy(newSnapshot,snapshot);
+            strcat(newSnapshot,"_new");
+            int fd = openFile(argv[argc-1], newSnapshot);
+            if (verifyDirectory(argv[i]) == 1) 
+            {
+                listFiles(argv[i], newSnapshot, 1, fd);
+            }
+            close(fd);
+            //comparam fisierul nou cu cel vechi
+            if (!compareSnapshots(argv[argc-1], snapshot, newSnapshot)) 
+            {
+                remove(snapshotPath);
+                strcpy(newSnapshot,snapshot);
+            } 
+            else 
+            {
+                remove(newSnapshot);
+            }
+        } 
+        else 
+        {
+            //fisierul nu exista
+            int fd = openFile(argv[argc-1], snapshot);
+            if (verifyDirectory(argv[i]) == 1) 
+            {
+                listFiles(argv[i], snapshot, 1, fd);
+            }
+            close(fd);
         }
-        close(fd);
     }
     return 0;
 }
