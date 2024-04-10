@@ -7,6 +7,7 @@
 #include<sys/stat.h>
 #include<unistd.h>
 #include<fcntl.h>
+#include<sys/wait.h>
 
 // functie pentru deschiderea fisierului 
 int openFile(char *path, char *file) 
@@ -134,16 +135,23 @@ int compareSnapshots(char *path, char *file1, char *file2)
             return 0;
         }
     }
-    if (bytes_read1 == 0 && bytes_read2 == 0) 
-    {
-        close(fd1);
-        close(fd2);
-        return 1;
-    }
     close(fd1);
     close(fd2);
-    return 0;
+    return 1;
 }
+
+/*char *renameToOld(char *s)
+{
+    char aux[2048]="";
+    for(int i=0;i<strlen(s);i++)
+    {
+        if(i<strlen-3)
+        {
+            strcat(aux,s[i]);
+        }
+    }
+    return aux;
+}*/
 
 int main(int argc, char *argv[]) 
 {
@@ -172,6 +180,8 @@ int main(int argc, char *argv[])
             char newSnapshot[2048];
             strcpy(newSnapshot,snapshot);
             strcat(newSnapshot,"_new");
+            char newSnapshotPath[2048];
+            sprintf(newSnapshotPath,"%s/%s",argv[argc-1],newSnapshot);
             int fd = openFile(argv[argc-1], newSnapshot);
             if (verifyDirectory(argv[i]) == 1) 
             {
@@ -179,14 +189,14 @@ int main(int argc, char *argv[])
             }
             close(fd);
             //comparam fisierul nou cu cel vechi
-            if (!compareSnapshots(argv[argc-1], snapshot, newSnapshot)) 
+            if (compareSnapshots(argv[argc-1], snapshot, newSnapshot)==0) 
             {
-                remove(snapshotPath);
-                strcpy(newSnapshot,snapshot);
+                unlink(snapshotPath);
+                //newSnapshot=renameToOld(newSnapshot);
             } 
             else 
             {
-                remove(newSnapshot);
+                unlink(newSnapshotPath);
             }
         } 
         else 
