@@ -140,19 +140,6 @@ int compareSnapshots(char *path, char *file1, char *file2)
     return 1;
 }
 
-/*char *renameToOld(char *s)
-{
-    char aux[2048]="";
-    for(int i=0;i<strlen(s);i++)
-    {
-        if(i<strlen-3)
-        {
-            strcat(aux,s[i]);
-        }
-    }
-    return aux;
-}*/
-
 int main(int argc, char *argv[]) 
 {
     if ((argc<3 || argc>11) && verifyArguments(argv,argc)==0) 
@@ -165,50 +152,67 @@ int main(int argc, char *argv[])
         perror("Eroare argumente!\n");
         exit(1);
     }
-     for (int i = 1; i < argc-1; i++) 
-     {
-        char snapshot[1024] = "snapshot_";
-        strcat(snapshot, argv[i]);
-        strcat(snapshot, ".txt");
-        char snapshotPath[2048];
-        sprintf(snapshotPath,"%s/%s",argv[argc-1],snapshot);
-        //verificam daca fisierul snapshot exista deja
-        struct stat info;
-        if (stat(snapshotPath, &info)==0) 
+    pid_t cpid;
+    int status;
+    for (int i = 1; i < argc-1; i++) 
+    {
+        cpid=fork();
+        if(cpid==-1)
         {
-            //cream un alt fisier snapshot
-            char newSnapshot[2048];
-            strcpy(newSnapshot,snapshot);
-            strcat(newSnapshot,"_new");
-            char newSnapshotPath[2048];
-            sprintf(newSnapshotPath,"%s/%s",argv[argc-1],newSnapshot);
-            int fd = openFile(argv[argc-1], newSnapshot);
-            if (verifyDirectory(argv[i]) == 1) 
+            perror("Eroare fork!\n");
+            exit(1);
+        }
+        else if(cpid==0)
+        {
+            char snapshot[1024] = "snapshot_";
+            strcat(snapshot, argv[i]);
+            strcat(snapshot, ".txt");
+            char snapshotPath[2048];
+            sprintf(snapshotPath,"%s/%s",argv[argc-1],snapshot);
+            //verificam daca fisierul snapshot exista deja
+            struct stat info;
+            if (stat(snapshotPath, &info)==0) 
             {
-                listFiles(argv[i], newSnapshot, 1, fd);
-            }
-            close(fd);
-            //comparam fisierul nou cu cel vechi
-            if (compareSnapshots(argv[argc-1], snapshot, newSnapshot)==0) 
-            {
-                unlink(snapshotPath);
-                //newSnapshot=renameToOld(newSnapshot);
+                //cream un alt fisier snapshot
+                char newSnapshot[2048];
+                strcpy(newSnapshot,snapshot);
+                strcat(newSnapshot,"_new");
+                char newSnapshotPath[2048];
+                sprintf(newSnapshotPath,"%s/%s",argv[argc-1],newSnapshot);
+                int fd = openFile(argv[argc-1], newSnapshot);
+                if (verifyDirectory(argv[i]) == 1) 
+                {
+                    listFiles(argv[i], newSnapshot, 1, fd);
+                }
+                close(fd);
+                //comparam fisierul nou cu cel vechi
+                if (compareSnapshots(argv[argc-1], snapshot, newSnapshot)==0) 
+                {
+                    unlink(snapshotPath);
+                } 
+                else 
+                {
+                    unlink(newSnapshotPath);
+                }
             } 
             else 
             {
-                unlink(newSnapshotPath);
+                //fisierul nu exista
+                int fd = openFile(argv[argc-1], snapshot);
+                if (verifyDirectory(argv[i]) == 1) 
+                {
+                    listFiles(argv[i], snapshot, 1, fd);
+                }
+                close(fd);
             }
-        } 
-        else 
-        {
-            //fisierul nu exista
-            int fd = openFile(argv[argc-1], snapshot);
-            if (verifyDirectory(argv[i]) == 1) 
-            {
-                listFiles(argv[i], snapshot, 1, fd);
-            }
-            close(fd);
+            printf("Snapshot for directory '%s' created successfully\n",argv[i]);
+            exit(0);
         }
+    }
+    for(int i=0;i<argc-2;i++)
+    {
+        pid_t tpid=wait(&status);
+        printf("Child proccess %d terminated with PID %d and exit code %d\n",i+1,tpid,WEXITSTATUS(status));
     }
     return 0;
 }
