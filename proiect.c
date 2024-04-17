@@ -142,19 +142,24 @@ int compareSnapshots(char *path, char *file1, char *file2)
 
 int main(int argc, char *argv[]) 
 {
-    if ((argc<3 || argc>11) && verifyArguments(argv,argc)==0) 
+    if ((argc<3 || argc>13) && verifyArguments(argv,argc)==0) 
     {
         perror("Eroare argumente!\n");
         exit(1);
     }
-    if(verifyDirectory(argv[argc-1])==0)
+    if(strcmp(argv[argc-2],"-x")!=0 || strcmp(argv[argc-4],"-o")!=0)
+    {
+        perror("Eroare argumente!\n");
+        exit(1);
+    }
+    if(verifyDirectory(argv[argc-3])==0 || verifyDirectory(argv[argc-1])==0)
     {
         perror("Eroare argumente!\n");
         exit(1);
     }
     pid_t cpid;
     int status;
-    for (int i = 1; i < argc-1; i++) 
+    for (int i = 1; i < argc-4; i++) 
     {
         cpid=fork();
         if(cpid==-1)
@@ -168,7 +173,7 @@ int main(int argc, char *argv[])
             strcat(snapshot, argv[i]);
             strcat(snapshot, ".txt");
             char snapshotPath[2048];
-            sprintf(snapshotPath,"%s/%s",argv[argc-1],snapshot);
+            sprintf(snapshotPath,"%s/%s",argv[argc-3],snapshot);
             //verificam daca fisierul snapshot exista deja
             struct stat info;
             if (stat(snapshotPath, &info)==0) 
@@ -178,15 +183,15 @@ int main(int argc, char *argv[])
                 strcpy(newSnapshot,snapshot);
                 strcat(newSnapshot,"_new");
                 char newSnapshotPath[2048];
-                sprintf(newSnapshotPath,"%s/%s",argv[argc-1],newSnapshot);
-                int fd = openFile(argv[argc-1], newSnapshot);
+                sprintf(newSnapshotPath,"%s/%s",argv[argc-3],newSnapshot);
+                int fd = openFile(argv[argc-3], newSnapshot);
                 if (verifyDirectory(argv[i]) == 1) 
                 {
                     listFiles(argv[i], newSnapshot, 1, fd);
                 }
                 close(fd);
                 //comparam fisierul nou cu cel vechi
-                if (compareSnapshots(argv[argc-1], snapshot, newSnapshot)==0) 
+                if (compareSnapshots(argv[argc-3], snapshot, newSnapshot)==0) 
                 {
                     unlink(snapshotPath);
                 } 
@@ -198,7 +203,7 @@ int main(int argc, char *argv[])
             else 
             {
                 //fisierul nu exista
-                int fd = openFile(argv[argc-1], snapshot);
+                int fd = openFile(argv[argc-3], snapshot);
                 if (verifyDirectory(argv[i]) == 1) 
                 {
                     listFiles(argv[i], snapshot, 1, fd);
@@ -209,7 +214,7 @@ int main(int argc, char *argv[])
             exit(0);
         }
     }
-    for(int i=0;i<argc-2;i++)
+    for(int i=0;i<argc-5;i++)
     {
         pid_t tpid=wait(&status);
         printf("Child proccess %d terminated with PID %d and exit code %d\n",i+1,tpid,WEXITSTATUS(status));
