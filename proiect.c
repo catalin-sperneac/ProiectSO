@@ -23,14 +23,46 @@ int openFile(char *path, char *file)
     return fd;
 }
 
+// functie pentru executarea fisierului script
+void executeScript(char *arg1, char *arg2) 
+{
+    pid_t pid = fork();
+    if (pid == -1) 
+    {
+        perror("Eroare fork\n");
+        exit(1);
+    } 
+    else if (pid == 0) 
+    { 
+        char script_path[1024] = "./verificareASCII.sh";
+        if (execlp(script_path, "verificareASCII.sh", arg1, arg2, NULL) == -1) 
+        {
+            perror("Eroare executare fisier script\n");
+            exit(1);
+        }
+    } 
+    else 
+    { 
+        int status;
+        waitpid(pid, &status, 0);
+        if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) 
+        {
+            perror("Eroare executare fisier script\n");
+            exit(1);
+        }
+    }
+}
+
 //functie pentru parcurgerea recursiva a unui director pentru a obtine informatii despre acesta
 //path - calea catre director
 //depth - nivelul de adancime in director
-void listFiles(char *path, char *file, int depth, int fd) 
+void listFiles(char *path, char *file, int depth, int fd, char *isolated) 
 {
     DIR *dir;
     struct dirent *entry;
     struct stat file_info;
+    //executam fisierul script
+    executeScript(path,isolated);
     //deschidem directorul
     if (!(dir = opendir(path))) 
     {
@@ -69,7 +101,7 @@ void listFiles(char *path, char *file, int depth, int fd)
         //daca intrarea este un director, se va apela recursiv functia listFiles cu un nivel de adancime mai mare
         if (S_ISDIR(file_info.st_mode)) 
         {
-            listFiles(filepath, file, depth + 1, fd);
+            listFiles(filepath, file, depth + 1, fd, isolated);
         }
     }
     //inchidem directorul
@@ -187,7 +219,7 @@ int main(int argc, char *argv[])
                 int fd = openFile(argv[argc-3], newSnapshot);
                 if (verifyDirectory(argv[i]) == 1) 
                 {
-                    listFiles(argv[i], newSnapshot, 1, fd);
+                    listFiles(argv[i], newSnapshot, 1, fd, argv[argc-1]);
                 }
                 close(fd);
                 //comparam fisierul nou cu cel vechi
@@ -206,7 +238,7 @@ int main(int argc, char *argv[])
                 int fd = openFile(argv[argc-3], snapshot);
                 if (verifyDirectory(argv[i]) == 1) 
                 {
-                    listFiles(argv[i], snapshot, 1, fd);
+                    listFiles(argv[i], snapshot, 1, fd, argv[argc-1]);
                 }
                 close(fd);
             }
