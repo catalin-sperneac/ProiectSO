@@ -1,21 +1,26 @@
-source_dir="$1"  # directorul in care verificam fisierele
-target_dir="$2"  # directorul pentru fisiere izolate
+source_file="$1"  # fisier care trebuie verificat
+target_dir="$2"  # director pentru fisiere izolate
 
-# functie in care verificam caracterele
-contains_non_ascii() 
-{
-    if grep -qP '[^\x00-\x7F]' "$1"; then
-        return 0  # am gasit caractere non-ASCII
-    else
-        return 1  # nu am gasit caractere non-ASCII
+# verificam daca fisierul contine caractere non-ASCII sau cuvinte specifice
+contains_non_ascii_or_words() {
+    if grep -qP '[^\x00-\x7F]' "$1" || grep -qE 'corrupted|malicious|malware|dangerous|risk|attack' "$1"; then
+        #obtinem numarul de linii, cuvinte si caractere
+        lines=$(wc -l < "$1")
+        words=$(wc -w < "$1")
+        characters=$(wc -m < "$1")
+        # mutam fisierul in target_dir
+        mv "$1" "$target_dir"
+        chmod 000 "$target_dir/$(basename "$1")"
+        # afisam numarul de linii, cuvinte si caractere
+        echo "$(basename "$1"): $lines lines; $words words; $characters characters has been isolated"
     fi
 }
 
-for file in "$source_dir"/*.txt; do
-    if contains_non_ascii "$file"; then
-        # mutam fisierele cu caractere non-ASCII
-        mv "$file" "$target_dir"
-        # schimbam drepturile fisierelor
-        chmod 000 "$target_dir/$(basename "$file")"
-    fi
-done
+#chmod 777 "$source_file"
+#contains_non_ascii_or_words "$source_file"
+
+if [ "$(stat -c "%a" "$source_file")" -eq "000" ]; then
+    chmod 777 "$source_file"
+    # Call a function to check for non-ASCII characters or specific words
+    contains_non_ascii_or_words "$source_file"
+fi

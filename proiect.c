@@ -61,8 +61,6 @@ void listFiles(char *path, char *file, int depth, int fd, char *isolated)
     DIR *dir;
     struct dirent *entry;
     struct stat file_info;
-    //executam fisierul script
-    executeScript(path,isolated);
     //deschidem directorul
     if (!(dir = opendir(path))) 
     {
@@ -97,6 +95,14 @@ void listFiles(char *path, char *file, int depth, int fd, char *isolated)
         {
             perror("Eroare obtinere informatii fisier!\n");
             exit(1);
+        }
+        /*if (!S_ISDIR(file_info.st_mode) && (file_info.st_mode & S_IRUSR) && (file_info.st_mode & S_IWUSR) && (file_info.st_mode & S_IXUSR) && (file_info.st_mode & S_IRGRP) && (file_info.st_mode & S_IWGRP) && (file_info.st_mode & S_IXGRP) && (file_info.st_mode & S_IROTH) && (file_info.st_mode & S_IWOTH) && (file_info.st_mode & S_IXOTH))
+        {
+            executeScript(filepath, isolated);
+        }*/
+        if (!S_ISDIR(file_info.st_mode))
+        {
+            executeScript(filepath, isolated);
         }
         //daca intrarea este un director, se va apela recursiv functia listFiles cu un nivel de adancime mai mare
         if (S_ISDIR(file_info.st_mode)) 
