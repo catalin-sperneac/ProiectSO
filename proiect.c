@@ -24,7 +24,7 @@ int openFile(char *path, char *file)
 }
 
 // functie pentru executarea fisierului script
-void executeScript(char *arg1, char *arg2) 
+int executeScript(char arg[2048]) 
 {
     pid_t pid = fork();
     if (pid == -1) 
@@ -34,8 +34,8 @@ void executeScript(char *arg1, char *arg2)
     } 
     else if (pid == 0) 
     { 
-        char script_path[1024] = "./verificareASCII.sh";
-        if (execlp(script_path, "verificareASCII.sh", arg1, arg2, NULL) == -1) 
+        char script_path[1024] = "./verificare.sh";
+        if (execlp(script_path, "verificare.sh", arg, NULL) == -1) 
         {
             perror("Eroare executare fisier script\n");
             exit(1);
@@ -45,18 +45,68 @@ void executeScript(char *arg1, char *arg2)
     { 
         int status;
         waitpid(pid, &status, 0);
-        if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) 
+        if (!WIFEXITED(status)) 
         {
             perror("Eroare executare fisier script\n");
             exit(1);
         }
+        return WEXITSTATUS(status);
     }
+}
+
+//functie pentru mutarea unui fisier in directorul de fisiere izolate
+void moveFile(char *filepath, char *isolated)
+{
+    int src_fd = open(filepath, O_RDONLY);
+    if (src_fd == -1) 
+    {
+        perror("Eroare deschidere fisier suspect\n");
+        exit(1);
+    }
+    char *file = strrchr(filepath, '/');
+    if (file == NULL) 
+    {
+        file = filepath;
+    } 
+    else 
+    {
+        file++;
+    }
+    char newfilepath[2048];
+    sprintf(newfilepath, "%s/%s", isolated, file);
+    int dest_fd = open(newfilepath, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+    if (dest_fd == -1) 
+    {
+        perror("Eroare creare fisier izolat\n");
+        exit(1);
+    }
+    char c;
+    ssize_t bytes_read;
+    while ((bytes_read = read(src_fd, &c, sizeof(char))) > 0) 
+    {
+        if (write(dest_fd, &c, bytes_read) != bytes_read) 
+        {
+            perror("Eroare scriere fisier izolat\n");
+            close(src_fd);
+            close(dest_fd);
+            exit(1);
+        }
+    }
+    close(src_fd);
+    close(dest_fd);
+    if (chmod(newfilepath, 000) == -1) 
+    {
+        perror("Eroare setare drepturi\n");
+        exit(1);
+    }
+    unlink(filepath);
 }
 
 //functie pentru parcurgerea recursiva a unui director pentru a obtine informatii despre acesta
 //path - calea catre director
 //depth - nivelul de adancime in director
-void listFiles(char *path, char *file, int depth, int fd, char *isolated) 
+//isolated - directorul pentru fisiere izolate
+void listFiles(char *path, int depth, int fd, char *isolated) 
 {
     DIR *dir;
     struct dirent *entry;
@@ -85,29 +135,36 @@ void listFiles(char *path, char *file, int depth, int fd, char *isolated)
         strcat(buffer, "|_ ");
         strcat(buffer, entry->d_name);
         strcat(buffer, "\n");
-        if ((write(fd, buffer, strlen(buffer))) < 0) 
-        {
-            perror("Eroare write\n");
-            exit(1);
-        }
         //obtinem informatii despre fisierul/directorul curent
         if (stat(filepath, &file_info) == -1) 
         {
             perror("Eroare obtinere informatii fisier!\n");
             exit(1);
         }
-        /*if (!S_ISDIR(file_info.st_mode) && (file_info.st_mode & S_IRUSR) && (file_info.st_mode & S_IWUSR) && (file_info.st_mode & S_IXUSR) && (file_info.st_mode & S_IRGRP) && (file_info.st_mode & S_IWGRP) && (file_info.st_mode & S_IXGRP) && (file_info.st_mode & S_IROTH) && (file_info.st_mode & S_IWOTH) && (file_info.st_mode & S_IXOTH))
-        {
-            executeScript(filepath, isolated);
-        }*/
         if (!S_ISDIR(file_info.st_mode))
         {
-            executeScript(filepath, isolated);
+            if (executeScript(filepath) == 0) 
+            {
+                if ((write(fd, buffer, strlen(buffer))) < 0) 
+                {
+                    perror("Eroare scriere in snapshot\n\n");
+                    exit(1);
+                }
+            } 
+            else  
+            { 
+                moveFile(filepath, isolated);
+            }
         }
         //daca intrarea este un director, se va apela recursiv functia listFiles cu un nivel de adancime mai mare
         if (S_ISDIR(file_info.st_mode)) 
         {
-            listFiles(filepath, file, depth + 1, fd, isolated);
+            if ((write(fd, buffer, strlen(buffer))) < 0) 
+                {
+                    perror("Eroare scriere in snapshot\n\n");
+                    exit(1);
+                }
+            listFiles(filepath, depth + 1, fd, isolated);
         }
     }
     //inchidem directorul
@@ -225,7 +282,7 @@ int main(int argc, char *argv[])
                 int fd = openFile(argv[argc-3], newSnapshot);
                 if (verifyDirectory(argv[i]) == 1) 
                 {
-                    listFiles(argv[i], newSnapshot, 1, fd, argv[argc-1]);
+                    listFiles(argv[i], 1, fd, argv[argc-1]);
                 }
                 close(fd);
                 //comparam fisierul nou cu cel vechi
@@ -244,7 +301,7 @@ int main(int argc, char *argv[])
                 int fd = openFile(argv[argc-3], snapshot);
                 if (verifyDirectory(argv[i]) == 1) 
                 {
-                    listFiles(argv[i], snapshot, 1, fd, argv[argc-1]);
+                    listFiles(argv[i], 1, fd, argv[argc-1]);
                 }
                 close(fd);
             }
