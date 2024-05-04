@@ -106,7 +106,8 @@ void moveFile(char *filepath, char *isolated)
 //path - calea catre director
 //depth - nivelul de adancime in director
 //isolated - directorul pentru fisiere izolate
-void listFiles(char *path, int depth, int fd, char *isolated) 
+//nrfp - numar fisiere periculoase
+void listFiles(char *path, int depth, int fd, char *isolated, int *nrfp) 
 {
     DIR *dir;
     struct dirent *entry;
@@ -154,6 +155,7 @@ void listFiles(char *path, int depth, int fd, char *isolated)
             else  
             { 
                 moveFile(filepath, isolated);
+                (*nrfp)++;
             }
         }
         //daca intrarea este un director, se va apela recursiv functia listFiles cu un nivel de adancime mai mare
@@ -164,7 +166,7 @@ void listFiles(char *path, int depth, int fd, char *isolated)
                     perror("Eroare scriere in snapshot\n\n");
                     exit(1);
                 }
-            listFiles(filepath, depth + 1, fd, isolated);
+            listFiles(filepath, depth + 1, fd, isolated, nrfp);
         }
     }
     //inchidem directorul
@@ -252,67 +254,74 @@ int main(int argc, char *argv[])
         perror("Eroare argumente!\n");
         exit(1);
     }
-    pid_t cpid;
     int status;
+    //Cream pipe-urile
+    int pipes[argc-5][2];
+    for (int i = 0; i < argc-5; i++) 
+    {
+        if (pipe(pipes[i]) == -1) 
+        {
+            perror("Eroare creare pipe\n");
+            exit(1);
+        }
+    }
     for (int i = 1; i < argc-4; i++) 
     {
-        cpid=fork();
-        if(cpid==-1)
+        pid_t cpid = fork();
+        if (cpid == -1) 
         {
             perror("Eroare fork!\n");
             exit(1);
         }
-        else if(cpid==0)
+        else if (cpid == 0) 
         {
             char snapshot[1024] = "snapshot_";
             strcat(snapshot, argv[i]);
             strcat(snapshot, ".txt");
             char snapshotPath[2048];
-            sprintf(snapshotPath,"%s/%s",argv[argc-3],snapshot);
-            //verificam daca fisierul snapshot exista deja
+            sprintf(snapshotPath, "%s/%s", argv[argc-3], snapshot);
             struct stat info;
-            if (stat(snapshotPath, &info)==0) 
+            int nrfp=0;
+            if (stat(snapshotPath, &info) == 0) 
             {
-                //cream un alt fisier snapshot
                 char newSnapshot[2048];
-                strcpy(newSnapshot,snapshot);
-                strcat(newSnapshot,"_new");
+                strcpy(newSnapshot, snapshot);
+                strcat(newSnapshot, "_new");
                 char newSnapshotPath[2048];
-                sprintf(newSnapshotPath,"%s/%s",argv[argc-3],newSnapshot);
+                sprintf(newSnapshotPath, "%s/%s", argv[argc-3], newSnapshot);
                 int fd = openFile(argv[argc-3], newSnapshot);
-                if (verifyDirectory(argv[i]) == 1) 
-                {
-                    listFiles(argv[i], 1, fd, argv[argc-1]);
-                }
+                listFiles(argv[i], 1, fd, argv[argc-1], &nrfp);
                 close(fd);
-                //comparam fisierul nou cu cel vechi
-                if (compareSnapshots(argv[argc-3], snapshot, newSnapshot)==0) 
+                if (compareSnapshots(argv[argc-3], snapshot, newSnapshot) == 0) 
                 {
                     unlink(snapshotPath);
-                } 
+                }
                 else 
                 {
                     unlink(newSnapshotPath);
                 }
-            } 
+            }
             else 
             {
-                //fisierul nu exista
                 int fd = openFile(argv[argc-3], snapshot);
-                if (verifyDirectory(argv[i]) == 1) 
-                {
-                    listFiles(argv[i], 1, fd, argv[argc-1]);
-                }
+                listFiles(argv[i], 1, fd, argv[argc-1], &nrfp);
                 close(fd);
             }
-            printf("Snapshot for directory '%s' created successfully\n",argv[i]);
+
+            close(pipes[i][0]);
+            write(pipes[i][1], &nrfp, sizeof(int));
+            close(pipes[i][1]);
             exit(0);
         }
     }
-    for(int i=0;i<argc-5;i++)
+    for (int i = 0; i < argc-5; i++) 
     {
         pid_t tpid=wait(&status);
-        printf("Child proccess %d terminated with PID %d and exit code %d\n",i+1,tpid,WEXITSTATUS(status));
+        int count;
+        close(pipes[i][1]);
+        read(pipes[i][0], &count, sizeof(int));
+        close(pipes[i][0]);
+        printf("Procesul Copil %d s-a încheiat cu PID-ul %d și a găsit %d fișiere cu potențial periculos\n", i+1, tpid, count);
     }
     return 0;
 }
