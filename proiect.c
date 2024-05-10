@@ -9,7 +9,9 @@
 #include<fcntl.h>
 #include<sys/wait.h>
 
-// functie pentru deschiderea fisierului 
+// functie pentru deschiderea fisierului snapshot
+//path- calea catre snapshot
+//file - numele snapshot-ului
 int openFile(char *path, char *file) 
 {
     char snapshotPath[2048];
@@ -23,9 +25,16 @@ int openFile(char *path, char *file)
     return fd;
 }
 
-// functie pentru executarea fisierului script
-int executeScript(char arg[2048]) 
+// functie pentru executarea fisierului script si scriere a datelor in pipe
+// arg- calea catre fisier
+// pipefd - pipe-ul dintre procesul fiu si procesul nepot
+int executeScript(char arg[2048], int pipefd[2]) 
 {
+    if(pipe(pipefd)==-1)
+    {
+        perror("Eroare creare pipe\n");
+        exit(1);
+    }
     pid_t pid = fork();
     if (pid == -1) 
     {
@@ -34,27 +43,54 @@ int executeScript(char arg[2048])
     } 
     else if (pid == 0) 
     { 
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO); // redirectam stdout la partea de scriere a pipe-ului
+        close(pipefd[1]);
+
         char script_path[1024] = "./verificare.sh";
         if (execlp(script_path, "verificare.sh", arg, NULL) == -1) 
         {
-            perror("Eroare executare fisier script\n");
+            perror("Eroare executare script\n");
             exit(1);
         }
     } 
     else 
     { 
+        close(pipefd[1]);
+
+        char buffer[1024];
+        ssize_t bytes_read;
+        while ((bytes_read = read(pipefd[0], buffer, sizeof(buffer))) > 0) 
+        {
+            write(STDOUT_FILENO, buffer, bytes_read);
+        }
+        close(pipefd[0]);
+
         int status;
         waitpid(pid, &status, 0);
-        if (!WIFEXITED(status)) 
+        if (WIFEXITED(status)) 
         {
-            perror("Eroare executare fisier script\n");
+            if (WEXITSTATUS(status) == 1) 
+            {
+                return 1;
+            } 
+            else 
+            {
+                return 0;
+            }
+        }
+        else 
+        {
+            perror("Erroare executare script\n");
             exit(1);
         }
-        return WEXITSTATUS(status);
     }
 }
 
 //functie pentru mutarea unui fisier in directorul de fisiere izolate
+//cream un fisier nou cu acelasi nume si continut in directorul pentru izolate si il stergem pe cel vechi
+//filepath- calea catre fisier
+//isolated - calea catre directorul pentru fisiere izolate
 void moveFile(char *filepath, char *isolated)
 {
     int src_fd = open(filepath, O_RDONLY);
@@ -107,7 +143,8 @@ void moveFile(char *filepath, char *isolated)
 //depth - nivelul de adancime in director
 //isolated - directorul pentru fisiere izolate
 //nrfp - numar fisiere periculoase
-void listFiles(char *path, int depth, int fd, char *isolated, int *nrfp) 
+//pipefd- pipe-ul
+void listFiles(char *path, int depth, int fd, char *isolated, int *nrfp,int pipefd[2]) 
 {
     DIR *dir;
     struct dirent *entry;
@@ -144,18 +181,31 @@ void listFiles(char *path, int depth, int fd, char *isolated, int *nrfp)
         }
         if (!S_ISDIR(file_info.st_mode))
         {
-            if (executeScript(filepath) == 0) 
+            //daca fisierul nu are drepturi, o sa fie verificat de fisierul script
+            if(!(file_info.st_mode & S_IRUSR) && !(file_info.st_mode & S_IWUSR) && !(file_info.st_mode & S_IXUSR) && !(file_info.st_mode & S_IRGRP) && !(file_info.st_mode & S_IWGRP) && !(file_info.st_mode & S_IXGRP) && !(file_info.st_mode & S_IROTH) && !(file_info.st_mode & S_IWOTH) && !(file_info.st_mode & S_IXOTH))
+            {
+                int func=executeScript(filepath,pipefd);
+                if (func == 0) 
+                {
+                    if ((write(fd, buffer, strlen(buffer))) < 0) 
+                    {
+                        perror("Eroare scriere in snapshot\n\n");
+                        exit(1);
+                    }
+                } 
+                else if(func == 1)
+                { 
+                    moveFile(filepath, isolated);
+                    (*nrfp)++;
+                }
+            }
+            else
             {
                 if ((write(fd, buffer, strlen(buffer))) < 0) 
-                {
-                    perror("Eroare scriere in snapshot\n\n");
-                    exit(1);
-                }
-            } 
-            else  
-            { 
-                moveFile(filepath, isolated);
-                (*nrfp)++;
+                    {
+                        perror("Eroare scriere in snapshot\n\n");
+                        exit(1);
+                    }
             }
         }
         //daca intrarea este un director, se va apela recursiv functia listFiles cu un nivel de adancime mai mare
@@ -166,14 +216,15 @@ void listFiles(char *path, int depth, int fd, char *isolated, int *nrfp)
                     perror("Eroare scriere in snapshot\n\n");
                     exit(1);
                 }
-            listFiles(filepath, depth + 1, fd, isolated, nrfp);
-        }
+            listFiles(filepath, depth + 1, fd, isolated, nrfp,pipefd);
+        } 
     }
     //inchidem directorul
     closedir(dir);
 }
 
 //verificam daca argumentele sunt directoare
+// dir - calea catre director
 int verifyDirectory(char *dir)
 {
     struct stat info;
@@ -190,6 +241,8 @@ int verifyDirectory(char *dir)
 }
 
 //verificam daca exista argumente identice
+// arg- vector argumente in linia de comanda
+// n -numar argumente
 int verifyArguments(char *arg[],int n)
 {
     for(int i=1;i<n;i++)
@@ -206,6 +259,9 @@ int verifyArguments(char *arg[],int n)
 }
 
 //functie de comparare a 2 fisiere snapshot
+// path - calea catre cele 2 snapshot-uri
+// file1 - numele primului snapshot
+// file2 - numele celui de al doilea snapshot
 int compareSnapshots(char *path, char *file1, char *file2) 
 {
     char pathFile1[2048];
@@ -255,18 +311,9 @@ int main(int argc, char *argv[])
         exit(1);
     }
     int status;
-    //Cream pipe-urile
-    int pipes[argc-5][2];
-    for (int i = 0; i < argc-5; i++) 
-    {
-        if (pipe(pipes[i]) == -1) 
-        {
-            perror("Eroare creare pipe\n");
-            exit(1);
-        }
-    }
     for (int i = 1; i < argc-4; i++) 
     {
+        int pipefd[2];
         pid_t cpid = fork();
         if (cpid == -1) 
         {
@@ -275,23 +322,27 @@ int main(int argc, char *argv[])
         }
         else if (cpid == 0) 
         {
+            //cream numele snapshot-ului
             char snapshot[1024] = "snapshot_";
             strcat(snapshot, argv[i]);
             strcat(snapshot, ".txt");
             char snapshotPath[2048];
             sprintf(snapshotPath, "%s/%s", argv[argc-3], snapshot);
             struct stat info;
+            //numar fisiere periculoase in directorul dat
             int nrfp=0;
             if (stat(snapshotPath, &info) == 0) 
             {
+                //cream un snapshot nou
                 char newSnapshot[2048];
                 strcpy(newSnapshot, snapshot);
                 strcat(newSnapshot, "_new");
                 char newSnapshotPath[2048];
                 sprintf(newSnapshotPath, "%s/%s", argv[argc-3], newSnapshot);
                 int fd = openFile(argv[argc-3], newSnapshot);
-                listFiles(argv[i], 1, fd, argv[argc-1], &nrfp);
+                listFiles(argv[i], 1, fd, argv[argc-1], &nrfp, pipefd);
                 close(fd);
+                //comparam snapshot-ul vechi cu cel nou
                 if (compareSnapshots(argv[argc-3], snapshot, newSnapshot) == 0) 
                 {
                     unlink(snapshotPath);
@@ -300,28 +351,50 @@ int main(int argc, char *argv[])
                 {
                     unlink(newSnapshotPath);
                 }
+                close(pipefd[1]);
+                char buffer[1024];
+                ssize_t bytes_read;
+                // citim si afisam informatiile din pipe
+                while ((bytes_read = read(pipefd[0], buffer, sizeof(buffer))) > 0) 
+                {
+                    write(STDOUT_FILENO, buffer, bytes_read);
+                }
+                close(pipefd[0]);
+                //returnam numarul de fisiere periculoase
+                exit(nrfp);
             }
             else 
             {
+                //daca nu exista deja snapshot, se va crea unul
                 int fd = openFile(argv[argc-3], snapshot);
-                listFiles(argv[i], 1, fd, argv[argc-1], &nrfp);
+                listFiles(argv[i], 1, fd, argv[argc-1], &nrfp, pipefd);
                 close(fd);
+                close(pipefd[1]);
+                char buffer[1024];
+                ssize_t bytes_read;
+                // citim si afisam informatiile din pipe
+                while ((bytes_read = read(pipefd[0], buffer, sizeof(buffer))) > 0) 
+                {
+                    write(STDOUT_FILENO, buffer, bytes_read);
+                }
+                close(pipefd[0]);
+                //returnam numarul de fisiere periculoase
+                exit(nrfp);
             }
-
-            close(pipes[i][0]);
-            write(pipes[i][1], &nrfp, sizeof(int));
-            close(pipes[i][1]);
-            exit(0);
         }
+        close(pipefd[0]);
     }
+    // afisam PID-ul si numarul de fisiere periculoase al procesului copil
     for (int i = 0; i < argc-5; i++) 
     {
         pid_t tpid=wait(&status);
-        int count;
-        close(pipes[i][1]);
-        read(pipes[i][0], &count, sizeof(int));
-        close(pipes[i][0]);
-        printf("Procesul Copil %d s-a încheiat cu PID-ul %d și a găsit %d fișiere cu potențial periculos\n", i+1, tpid, count);
+        if(WIFEXITED(status))
+        {
+            //i+1 - numarul procesului copil
+            //tpid - PID-ul procesului copil
+            // WEXISTATUS(status) - numarul de fisiere periculoase din director
+            printf("Procesul Copil %d s-a încheiat cu PID-ul %d și a găsit %d fișiere cu potențial periculos\n", i+1, tpid, WEXITSTATUS(status));
+        }
     }
     return 0;
 }
